@@ -16,7 +16,7 @@ JSONEditor.defaults.editors.string = JSONEditor.AbstractEditor.extend({
       return;
     }
     
-    if(value === null) value = "";
+    if(value === null || typeof value === 'undefined') value = "";
     else if(typeof value === "object") value = JSON.stringify(value);
     else if(typeof value !== "string") value = ""+value;
     
@@ -49,13 +49,10 @@ JSONEditor.defaults.editors.string = JSONEditor.AbstractEditor.extend({
     if(initial) this.is_dirty = false;
     else if(this.jsoneditor.options.show_errors === "change") this.is_dirty = true;
     
-    if(changed) {
-      if(self.parent) self.parent.onChildEditorChange(self);
-      else self.jsoneditor.onChange();
-    }
-    
-    this.watch_listener();
-    this.jsoneditor.notifyWatchers(this.path);
+    if(this.adjust_height) this.adjust_height(this.input);
+
+    // Bubble this setValue to parents if the value changed
+    this.onChange(changed);
   },
   getNumColumns: function() {
     var min = Math.ceil(Math.max(this.getTitle().length,this.schema.maxLength||0,this.schema.minLength||0)/5);
@@ -120,6 +117,7 @@ JSONEditor.defaults.editors.string = JSONEditor.AbstractEditor.extend({
           'ejs',
           'erlang',
           'golang',
+          'groovy',
           'handlebars',
           'haskell',
           'haxe',
@@ -179,7 +177,12 @@ JSONEditor.defaults.editors.string = JSONEditor.AbstractEditor.extend({
     if(typeof this.schema.pattern !== "undefined") this.input.setAttribute('pattern',this.schema.pattern);
     else if(typeof this.schema.minLength !== "undefined") this.input.setAttribute('pattern','.{'+this.schema.minLength+',}');
 
-    if(this.options.compact) this.container.setAttribute('class',this.container.getAttribute('class')+' compact');
+    if(this.options.compact) {
+      this.container.className += ' compact';
+    }
+    else {
+      if(this.options.input_width) this.input.style.width = this.options.input_width;
+    }
 
     if(this.schema.readOnly || this.schema.readonly || this.schema.template) {
       this.always_disabled = true;
@@ -208,11 +211,44 @@ JSONEditor.defaults.editors.string = JSONEditor.AbstractEditor.extend({
         self.is_dirty = true;
 
         self.refreshValue();
-        self.watch_listener();
-        self.jsoneditor.notifyWatchers(self.path);
-        if(self.parent) self.parent.onChildEditorChange(self);
-        else self.jsoneditor.onChange();
+        self.onChange(true);
       });
+      
+    if(this.options.input_height) this.input.style.height = this.options.input_height;
+    if(this.options.expand_height) {
+      this.adjust_height = function(el) {
+        if(!el) return;
+        var i, ch=el.offsetHeight;
+        // Input too short
+        if(el.offsetHeight < el.scrollHeight) {
+          i=0;
+          while(el.offsetHeight < el.scrollHeight+3) {
+            if(i>100) break;
+            i++;
+            ch++;
+            el.style.height = ch+'px';
+          }
+        }
+        else {
+          i=0;
+          while(el.offsetHeight >= el.scrollHeight+3) {
+            if(i>100) break;
+            i++;
+            ch--;
+            el.style.height = ch+'px';
+          }
+          el.style.height = (ch+1)+'px';
+        }
+      };
+      
+      this.input.addEventListener('keyup',function(e) {
+        self.adjust_height(this);
+      });
+      this.input.addEventListener('change',function(e) {
+        self.adjust_height(this);
+      });
+      this.adjust_height();
+    }
 
     if(this.format) this.input.setAttribute('data-schemaformat',this.format);
 
@@ -225,6 +261,7 @@ JSONEditor.defaults.editors.string = JSONEditor.AbstractEditor.extend({
       // otherwise, in the case of an ace_editor creation,
       // it will generate an error trying to append it to the missing parentNode
       if(self.input.parentNode) self.afterInputReady();
+      if(self.adjust_height) self.adjust_height(self.input);
     });
 
     // Compile and store the template
@@ -278,9 +315,7 @@ JSONEditor.defaults.editors.string = JSONEditor.AbstractEditor.extend({
           self.input.value = val.html();
           self.value = self.input.value;
           self.is_dirty = true;
-          if(self.parent) self.parent.onChildEditorChange(self);
-          else self.jsoneditor.onChange();
-          self.jsoneditor.notifyWatchers(self.path);
+          self.onChange(true);
         });
       }
       // EpicEditor for markdown (if it's loaded)
@@ -303,9 +338,7 @@ JSONEditor.defaults.editors.string = JSONEditor.AbstractEditor.extend({
           self.input.value = val;
           self.value = val;
           self.is_dirty = true;
-          if(self.parent) self.parent.onChildEditorChange(self);
-          else self.jsoneditor.onChange();
-          self.jsoneditor.notifyWatchers(self.path);
+          self.onChange(true);
         });
       }
       // ACE editor for everything else
@@ -338,9 +371,7 @@ JSONEditor.defaults.editors.string = JSONEditor.AbstractEditor.extend({
           self.input.value = val;
           self.refreshValue();
           self.is_dirty = true;
-          if(self.parent) self.parent.onChildEditorChange(self);
-          else self.jsoneditor.onChange();
-          self.jsoneditor.notifyWatchers(self.path);
+          self.onChange(true);
         });
       }
     }
@@ -396,9 +427,9 @@ JSONEditor.defaults.editors.string = JSONEditor.AbstractEditor.extend({
     var self = this;
     
     if(this.jsoneditor.options.show_errors === "always") {}
-    else if(!this.is_dirty) return;
+    else if(!this.is_dirty && this.previous_error_setting===this.jsoneditor.options.show_errors) return;
     
-    
+    this.previous_error_setting = this.jsoneditor.options.show_errors;
 
     var messages = [];
     $each(errors,function(i,error) {
